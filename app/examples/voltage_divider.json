@@ -1,0 +1,10 @@
+{
+  "description": "电阻串联分压：V1=5V，R1=1kΩ（in→out），R2=2kΩ（out→地）。手算：V(out) = 5 × R2/(R1+R2) = 10/3 ≈ 3.3333V，回路电流 = 5/3kΩ ≈ 1.6667mA（电压源支路电流按“流入正极”约定为 -1.6667mA）。",
+  "netlist": {
+    "elements": [
+      {"name": "V1", "type": "voltage_source", "nodes": ["in", "0"], "value": 5.0},
+      {"name": "R1", "type": "resistor", "nodes": ["in", "out"], "value": 1000.0},
+      {"name": "R2", "type": "resistor", "nodes": ["out", "0"], "value": 2000.0}
+    ]
+  }
+}

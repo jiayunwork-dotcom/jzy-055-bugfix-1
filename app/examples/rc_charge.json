@@ -1,0 +1,12 @@
+{
+  "description": "RC 充电：V1=5V 经 R1=1kΩ 给 C1=1µF 充电（零初始电压）。时间常数 τ = R·C = 1ms，v(t) = 5·(1 − e^(−t/τ))：t=τ 时约 3.1594V（63.2%），t=5τ=5ms 时约 4.9663V。建议 dt=1e-5、tstop=5e-3。",
+  "netlist": {
+    "elements": [
+      {"name": "V1", "type": "voltage_source", "nodes": ["in", "0"], "value": 5.0},
+      {"name": "R1", "type": "resistor", "nodes": ["in", "out"], "value": 1000.0},
+      {"name": "C1", "type": "capacitor", "nodes": ["out", "0"], "value": 1e-6, "initial": 0.0}
+    ]
+  },
+  "suggested_dt": 1e-5,
+  "suggested_tstop": 5e-3
+}
