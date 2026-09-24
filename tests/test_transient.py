@@ -93,6 +93,32 @@ def test_time_series_shape_and_spacing():
         assert len(series) == len(res.time)
 
 
+def floating_cap_netlist():
+    """电容跨接两个非地节点：n1=2.5V（1k/1k 分压），n2=3.75V（1k/3k 分压）。"""
+    return parse_netlist([
+        {"name": "V1", "type": "voltage_source", "nodes": ["in", "0"], "value": 5.0},
+        {"name": "R1", "type": "resistor", "nodes": ["in", "n1"], "value": 1000.0},
+        {"name": "R2", "type": "resistor", "nodes": ["n1", "0"], "value": 1000.0},
+        {"name": "R3", "type": "resistor", "nodes": ["in", "n2"], "value": 1000.0},
+        {"name": "R4", "type": "resistor", "nodes": ["n2", "0"], "value": 3000.0},
+        {"name": "C1", "type": "capacitor", "nodes": ["n1", "n2"], "value": 1e-6},
+    ])
+
+
+def test_floating_capacitor_charges_with_thevenin_time_constant():
+    """浮空电容的充电规律可手算：两端戴维南等效 2.5V/500Ω 与 3.75V/750Ω 串联，
+    电容电压 v(n1)−v(n2) 以 τ=(500+750)·C=1.25ms 从 0 指数趋向 −1.25V。"""
+    tau = 1250.0 * 1e-6
+    res = run_transient(floating_cap_netlist(), dt=1e-5, tstop=5 * tau)
+    v_cap = [a - b for a, b in zip(res.node_voltages["n1"], res.node_voltages["n2"])]
+    # 到达 63.2% 终值（−1.25·(1−e^{−1})）的时刻必须与 τ 对得上
+    target = -1.25 * (1.0 - math.exp(-1.0))
+    idx = next(i for i, v in enumerate(v_cap) if v <= target)
+    assert math.isclose(res.time[idx], tau, rel_tol=1e-2)
+    # 5τ 处与指数规律 −1.25·(1−e^{−5}) 吻合（含后向欧拉离散误差）
+    assert math.isclose(v_cap[-1], -1.25 * (1.0 - math.exp(-5.0)), rel_tol=1e-3)
+
+
 def test_invalid_time_params_rejected():
     circuit = rc_netlist()
     bad = [(0.0, 1.0), (-1e-3, 1.0), (1e-3, 1e-4), (1e-3, 0.0), (None, 1.0), (1e-3, None)]

@@ -84,3 +84,53 @@ def test_transient_steady_state_matches_dc_operating_point():
                         dc2.inductor_currents["L1"], abs_tol=1e-9)
     assert math.isclose(tr2.node_voltages["out"][-1],
                         dc2.node_voltages["out"], abs_tol=1e-6)
+
+
+def floating_cap_netlist(v0: float = 0.0):
+    """电容横跨两个非地节点：R1/R2 分压得 n1=2.5V，R3/R4 分压得 n2=3.75V。"""
+    elements = [
+        {"name": "V1", "type": "voltage_source", "nodes": ["in", "0"], "value": 5.0},
+        {"name": "R1", "type": "resistor", "nodes": ["in", "n1"], "value": 1000.0},
+        {"name": "R2", "type": "resistor", "nodes": ["n1", "0"], "value": 1000.0},
+        {"name": "R3", "type": "resistor", "nodes": ["in", "n2"], "value": 1000.0},
+        {"name": "R4", "type": "resistor", "nodes": ["n2", "0"], "value": 3000.0},
+        {"name": "C1", "type": "capacitor", "nodes": ["n1", "n2"], "value": 1e-6},
+    ]
+    if v0:
+        elements[-1]["initial"] = v0
+    return parse_netlist(elements)
+
+
+def test_floating_capacitor_steady_state_matches_dc_operating_point():
+    """浮空电容（两端都不接地）：瞬态稳态必须收敛到同一张网表的直流工作点。"""
+    circuit = floating_cap_netlist()
+    dc = solve_dc(circuit)
+    # 手算锚点：n1 = 5·1k/(1k+1k) = 2.5V，n2 = 5·3k/(1k+3k) = 3.75V
+    assert math.isclose(dc.node_voltages["n1"], 2.5, rel_tol=1e-12)
+    assert math.isclose(dc.node_voltages["n2"], 3.75, rel_tol=1e-12)
+
+    # 从电容看进去的戴维南电阻 (1k‖1k)+(1k‖3k) = 1250Ω → τ=1.25ms，推 20τ 到稳态
+    tr = run_transient(circuit, dt=1e-5, tstop=2.5e-2)
+    for node in ("in", "n1", "n2", "0"):
+        assert math.isclose(tr.node_voltages[node][-1],
+                            dc.node_voltages[node], abs_tol=1e-6)
+    # 浮空电容两端的电压差收敛到两节点的直流电位差 2.5 − 3.75 = −1.25V
+    v_cap_end = tr.node_voltages["n1"][-1] - tr.node_voltages["n2"][-1]
+    v_cap_dc = dc.node_voltages["n1"] - dc.node_voltages["n2"]
+    assert math.isclose(v_cap_end, v_cap_dc, abs_tol=1e-6)
+    assert math.isclose(v_cap_end, -1.25, abs_tol=1e-6)
+
+
+def test_floating_capacitor_steady_state_independent_of_initial_condition():
+    """浮空电容带非零初值：t=0 严格自洽，稳态仍收敛到同一直流工作点。"""
+    v0 = 0.5
+    circuit = floating_cap_netlist(v0=v0)
+    dc = solve_dc(circuit)
+    tr = run_transient(circuit, dt=1e-5, tstop=2.5e-2)
+    # t=0 时电容换成 v0 电压源，两端电压差必须严格等于初值
+    assert math.isclose(tr.node_voltages["n1"][0] - tr.node_voltages["n2"][0],
+                        v0, rel_tol=0.0, abs_tol=1e-12)
+    # 初值只影响起点，不影响归宿
+    for node in ("n1", "n2"):
+        assert math.isclose(tr.node_voltages[node][-1],
+                            dc.node_voltages[node], abs_tol=1e-6)

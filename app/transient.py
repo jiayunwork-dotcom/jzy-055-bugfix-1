@@ -94,7 +94,10 @@ def run_transient(circuit: Circuit, dt: float | None, tstop: float | None) -> Tr
         for c in circuit.capacitors:
             geq = c.capacitance / dt
             builder.add_conductance(c.a, c.b, geq)
-            builder.add_current_source(circuit.ground, c.a, geq * cap_v[c.name])  # 等效源：注入 a 端
+            # 等效历史源与电容同跨 a、b 两端：从 b 流向 a，大小 Geq·v_n。
+            # 若误接到地上，浮空电容的 b 端 KCL 会丢失 −Geq·v_n 项，
+            # 导致瞬态稳态偏离直流工作点。
+            builder.add_current_source(c.b, c.a, geq * cap_v[c.name])
         for ind in circuit.inductors:
             geq = dt / ind.inductance
             builder.add_conductance(ind.a, ind.b, geq)

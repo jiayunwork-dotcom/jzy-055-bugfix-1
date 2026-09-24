@@ -90,3 +90,35 @@ def test_error_response_shape():
     body = resp.json()
     assert set(body) == {"code", "message"}
     assert body["code"] == "UNKNOWN_ELEMENT_TYPE"
+
+
+FLOATING_CAP = {
+    "elements": [
+        {"name": "V1", "type": "voltage_source", "nodes": ["in", "0"], "value": 5.0},
+        {"name": "R1", "type": "resistor", "nodes": ["in", "n1"], "value": 1000.0},
+        {"name": "R2", "type": "resistor", "nodes": ["n1", "0"], "value": 1000.0},
+        {"name": "R3", "type": "resistor", "nodes": ["in", "n2"], "value": 1000.0},
+        {"name": "R4", "type": "resistor", "nodes": ["n2", "0"], "value": 3000.0},
+        # 电容横跨两个非地节点：n1=2.5V、n2=3.75V
+        {"name": "C1", "type": "capacitor", "nodes": ["n1", "n2"], "value": 1e-6},
+    ]
+}
+
+
+def test_floating_capacitor_transient_converges_to_dc_over_http():
+    """端到端：浮空电容网表的瞬态末态与直流工作点在数值误差内一致。"""
+    dc = client.post("/api/dc", json={"netlist": FLOATING_CAP})
+    assert dc.status_code == 200
+    dc_v = dc.json()["node_voltages"]
+    assert math.isclose(dc_v["n1"], 2.5, rel_tol=1e-12)
+    assert math.isclose(dc_v["n2"], 3.75, rel_tol=1e-12)
+
+    tr = client.post("/api/transient",
+                     json={"netlist": FLOATING_CAP, "dt": 1e-5, "tstop": 2.5e-2})
+    assert tr.status_code == 200
+    tr_v = tr.json()["node_voltages"]
+    for node in ("in", "n1", "n2", "0"):
+        assert math.isclose(tr_v[node][-1], dc_v[node], abs_tol=1e-6)
+    # 电容两端电压差收敛到两节点的直流电位差
+    assert math.isclose(tr_v["n1"][-1] - tr_v["n2"][-1],
+                        dc_v["n1"] - dc_v["n2"], abs_tol=1e-6)
