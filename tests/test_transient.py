@@ -4,6 +4,7 @@ import math
 
 import pytest
 
+from app.dc import solve_dc
 from app.errors import CircuitError, ErrorCode
 from app.netlist import parse_netlist
 from app.transient import MAX_STEPS, run_transient
@@ -82,6 +83,62 @@ def test_inductor_initial_current_is_self_consistent():
     assert abs(currents[1] - i0) <= (dt / inductance) * V * 1.01
     # 稳态趋向 V/R
     assert math.isclose(currents[-1], V / R, rel_tol=1e-2)
+
+
+def floating_cap_netlist(v0: float = 0.0):
+    """电容 C1 横跨 n1、n2 两个非地节点：两端都有确定直流通路，但都不接地。
+
+    手算稳态：R1/R2 分压得 n1=2.5V，R3/R4 分压得 n2=3.75V，
+    电容稳态电压 v(n2)-v(n1)=1.25V。
+    """
+    elements = [
+        {"name": "V1", "type": "voltage_source", "nodes": ["in", "0"], "value": 5.0},
+        {"name": "R1", "type": "resistor", "nodes": ["in", "n1"], "value": 1000.0},
+        {"name": "R2", "type": "resistor", "nodes": ["n1", "0"], "value": 1000.0},
+        {"name": "R3", "type": "resistor", "nodes": ["in", "n2"], "value": 1000.0},
+        {"name": "R4", "type": "resistor", "nodes": ["n2", "0"], "value": 3000.0},
+        {"name": "C1", "type": "capacitor", "nodes": ["n2", "n1"], "value": 1e-6},
+    ]
+    if v0:
+        elements[-1]["initial"] = v0
+    return parse_netlist(elements)
+
+
+def test_floating_capacitor_steady_state_matches_dc_operating_point():
+    """浮空电容（两端均不接地）：瞬态推到稳态必须与同网表直流工作点一致。"""
+    circuit = floating_cap_netlist()
+    dc = solve_dc(circuit)
+    # 直流工作点本身先与手算核对：n1=2.5V、n2=3.75V
+    assert math.isclose(dc.node_voltages["n1"], 2.5, rel_tol=1e-12)
+    assert math.isclose(dc.node_voltages["n2"], 3.75, rel_tol=1e-12)
+
+    # 电容看到的戴维南电阻 (1k||1k)+(1k||3k)=1.25kΩ，τ≈1.25ms；推 16τ 到稳态
+    tr = run_transient(circuit, dt=1e-5, tstop=2e-2)
+    n1_end = tr.node_voltages["n1"][-1]
+    n2_end = tr.node_voltages["n2"][-1]
+    assert math.isclose(n1_end, dc.node_voltages["n1"], abs_tol=1e-6)
+    assert math.isclose(n2_end, dc.node_voltages["n2"], abs_tol=1e-6)
+    # 浮空电容两端电压差收敛到两节点的直流电位差 3.75-2.5=1.25V
+    assert math.isclose(n2_end - n1_end, 1.25, abs_tol=1e-6)
+
+    # 起点自洽：v0=0 的电容在 t=0 相当于 0V 电压源，强制 v(n2)=v(n1)，
+    # 与末态 2.5V/3.75V 明显不同——瞬态确实发生了演化，上面的断言不是空转
+    assert math.isclose(tr.node_voltages["n2"][0], tr.node_voltages["n1"][0],
+                        rel_tol=0.0, abs_tol=1e-12)
+
+
+def test_floating_capacitor_initial_condition_self_consistent_and_same_steady_state():
+    """浮空电容带非零初值：起点严格等于初值，稳态仍收敛到同一直流工作点。"""
+    v0 = -0.5  # 初始 v(n2)-v(n1)
+    circuit = floating_cap_netlist(v0=v0)
+    dc = solve_dc(circuit)
+    tr = run_transient(circuit, dt=1e-5, tstop=2e-2)
+    # t=0 电容两端电压差必须严格等于初始条件，不突跳
+    assert math.isclose(tr.node_voltages["n2"][0] - tr.node_voltages["n1"][0], v0,
+                        rel_tol=0.0, abs_tol=1e-12)
+    # 初始条件只影响过渡过程，不改变稳态：末态仍收敛到同一直流工作点
+    assert math.isclose(tr.node_voltages["n1"][-1], dc.node_voltages["n1"], abs_tol=1e-6)
+    assert math.isclose(tr.node_voltages["n2"][-1], dc.node_voltages["n2"], abs_tol=1e-6)
 
 
 def test_time_series_shape_and_spacing():

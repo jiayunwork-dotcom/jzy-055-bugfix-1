@@ -94,7 +94,10 @@ def run_transient(circuit: Circuit, dt: float | None, tstop: float | None) -> Tr
         for c in circuit.capacitors:
             geq = c.capacitance / dt
             builder.add_conductance(c.a, c.b, geq)
-            builder.add_current_source(circuit.ground, c.a, geq * cap_v[c.name])  # 等效源：注入 a 端
+            # 历史电流源必须挂在电容自己的两端之间（b → a：注入 a、从 b 抽出），
+            # 与伴随电导构成完整的诺顿等效。若错挂到地，b 端 KCL 会丢掉抽出项，
+            # 只有 b 恰好是地时才碰巧正确——浮空电容的稳态就会被解错。
+            builder.add_current_source(c.b, c.a, geq * cap_v[c.name])
         for ind in circuit.inductors:
             geq = dt / ind.inductance
             builder.add_conductance(ind.a, ind.b, geq)
